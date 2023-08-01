@@ -1,57 +1,51 @@
-const fs = require('fs');
-const path = require('path');
-const { EmbedBuilder, SlashCommandBuilder } = require('discord.js');
+const { SlashCommandBuilder } = require('discord.js');
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('cc-money')
     .setDescription('Generate money for your character.'),
-  async execute(interaction) {
+  async execute(interaction, db) {
     const userId = interaction.user.id;
-    const usersPath = path.join(__dirname, '..', '..', 'database', 'users.json');
-    const usersData = fs.readFileSync(usersPath, 'utf8');
-    const users = JSON.parse(usersData);
 
-    if (users[userId].character) {
-      await interaction.reply({ content: "You have already have a character.", ephemeral: true });
-      return;
-    }
+    db.get('SELECT * FROM users WHERE userId = ?', [userId], (err, userRow) => {
+      if (err) {
+        console.error('Error querying users table:', err);
+        return;
+      }
 
-    const charactersPath = path.join(__dirname, '..', '..', 'database', 'characters.json');
-    const charactersData = fs.readFileSync(charactersPath, 'utf8');
-    const characters = JSON.parse(charactersData);
+      if (userRow && userRow.character !== null) {
+        interaction.reply({ content: "You already have a character.", ephemeral: true });
+      } else {
+        db.get('SELECT * FROM characters WHERE userId = ?', [userId], (err, charRow) => {
+          if (err) {
+            console.error('Error querying characters table:', err);
+            return;
+          }
 
-    const money = getRandomNumber(3, 18);
+          const money = getRandomNumber(3, 18);
 
-    if (!characters[userId]) {
-      characters[userId] = {
-        name: '',
-        species: null,
-        archetype: null,
-        alignment: null,
-        strength: null,
-        dexterity: null,
-        constitution: null,
-        intelligence: null,
-        wisdom: null,
-        charisma: null,
-        money: null,
-        level: 1,
-        experience: 0,
-        hp: 0,
-      };
-    }
+          if (!charRow) {
+            const insertCharQuery = `INSERT INTO characters (userId, name, species, archetype, alignment, strength, dexterity, constitution, intelligence, wisdom, charisma, money, level, experience, hp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+            db.run(insertCharQuery, [userId, '', null, null, null, null, null, null, null, null, null, money, 1, 0, 0], (err) => {
+              if (err) {
+                console.error('Error inserting data into characters table:', err);
+                return;
+              }
+            });
+          } else {
+            const updateMoneyQuery = `UPDATE characters SET money = ? WHERE userId = ?`;
+            db.run(updateMoneyQuery, [money, userId], (err) => {
+              if (err) {
+                console.error('Error updating money in characters table:', err);
+                return;
+              }
+            });
+          }
 
-    characters[userId].money = money;
-
-    fs.writeFileSync(charactersPath, JSON.stringify(characters, null, 2));
-
-    const embed = new EmbedBuilder()
-      .setColor(0x00FF00)
-      .setTitle('Money Generated')
-      .setDescription(`You received ${money} gold coins! 💰`);
-
-    await interaction.reply({ embeds: [embed], ephemeral: true });
+          interaction.reply({ content: `You received ${money} gold coins! 💰`, ephemeral: true });
+        });
+      }
+    });
   },
 };
 

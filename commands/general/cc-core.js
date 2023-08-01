@@ -1,6 +1,4 @@
-const fs = require('fs');
-const path = require('path');
-const { EmbedBuilder, SlashCommandBuilder } = require('discord.js');
+const { SlashCommandBuilder } = require('discord.js');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -39,61 +37,53 @@ module.exports = {
           { name: 'Chaotic', value: 'Chaotic' }
         )
     ),
-  async execute(interaction) {
+  async execute(interaction, db) {
     const userId = interaction.user.id;
-    const usersPath = path.join(__dirname, '..', '..', 'database', 'users.json');
-    const usersData = fs.readFileSync(usersPath, 'utf8');
-    const users = JSON.parse(usersData);
 
-    if (users[userId].character) {
-      await interaction.reply({ content: "You already have a character.", ephemeral: true });
-      return;
-    }
+    db.get('SELECT * FROM users WHERE userId = ?', [userId], (err, userRow) => {
+      if (err) {
+        console.error('Error querying users table:', err);
+        return;
+      }
 
-    const archetype = interaction.options.getString('archetype');
-    const species = interaction.options.getString('species');
-    const alignment = interaction.options.getString('alignment');
+      if (userRow && userRow.character !== null) {
+        interaction.reply({ content: "You already have a character.", ephemeral: true });
+      } else {
+        const archetype = interaction.options.getString('archetype');
+        const species = interaction.options.getString('species');
+        const alignment = interaction.options.getString('alignment');
 
-    const charactersPath = path.join(__dirname, '..', '..', 'database', 'characters.json');
-    const charactersData = fs.readFileSync(charactersPath, 'utf8');
-    const characters = JSON.parse(charactersData);
+        db.get('SELECT * FROM characters WHERE userId = ?', [userId], (err, charRow) => {
+          if (err) {
+            console.error('Error querying characters table:', err);
+            return;
+          }
 
-    if (!characters[userId]) {
-      characters[userId] = {
-        name: '',
-        species: null,
-        archetype: null,
-        alignment: null,
-        strength: null,
-        dexterity: null,
-        constitution: null,
-        intelligence: null,
-        wisdom: null,
-        charisma: null,
-        money: null,
-        level: 1,
-        experience: 0,
-        hp: 0,
-      };
-    }
+          if (!charRow) {
+            const insertCharQuery = `INSERT INTO characters (userId, name, species, archetype, alignment, strength, dexterity, constitution, intelligence, wisdom, charisma, money, level, experience, hp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+            db.run(insertCharQuery, [userId, '', species, archetype, alignment, null, null, null, null, null, null, null, 1, 0, 0], (err) => {
+              if (err) {
+                console.error('Error inserting data into characters table:', err);
+                return;
+              }
+            });
+          } else {
+            const updateCharQuery = `UPDATE characters SET species = ?, archetype = ?, alignment = ? WHERE userId = ?`;
+            db.run(updateCharQuery, [species, archetype, alignment, userId], (err) => {
+              if (err) {
+                console.error('Error updating character details in characters table:', err);
+                return;
+              }
+            });
+          }
 
-    characters[userId].archetype = archetype;
-    characters[userId].species = species;
-    characters[userId].alignment = alignment;
+          const description = `**Archetype:** ${archetype}\n` +
+            `**Species:** ${species}\n` +
+            `**Alignment:** ${alignment}`;
 
-    fs.writeFileSync(charactersPath, JSON.stringify(characters, null, 2));
-
-    // Format character details into the description
-    const description = `**Archetype:** ${archetype}\n` +
-      `**Species:** ${species}\n` +
-      `**Alignment:** ${alignment}`;
-
-    // Create the character details embed
-    const embed = new EmbedBuilder()
-      .setColor(0x0099FF)
-      .setTitle('Character Details')
-      .setDescription(description);
-
-    await interaction.reply({ embeds: [embed], ephemeral: true });
+          interaction.reply({ content: description, ephemeral: true });
+        });
+      }
+    });
   },
 };

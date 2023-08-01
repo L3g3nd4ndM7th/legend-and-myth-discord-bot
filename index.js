@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { Client, Collection, GatewayIntentBits } = require('discord.js');
 const { token } = require('./config.json');
+const sqlite3 = require('sqlite3');
 
 const client = new Client({ intents: [
   GatewayIntentBits.Guilds,
@@ -11,8 +12,16 @@ const client = new Client({ intents: [
   GatewayIntentBits.MessageContent
 ] });
 
+const db = new sqlite3.Database('./database/world.db', (err) => {
+  if (err) {
+    console.error('Error opening database:', err.message);
+  } else {
+    console.log('Connected to the world.db database.');
+  }
+});
+
 client.commands = new Collection();
-const profanityWords = ['shit', 'fuck', 'bitch', 'ass', 'pussy', 'dick', 'cock', 'cunt', 'nigger', 'cracker', 'fag'];
+const profanityWords = [];
 
 const readCommands = (dir) => {
   const files = fs.readdirSync(dir);
@@ -46,22 +55,14 @@ client.on('guildMemberAdd', async (member) => {
     userID: id,
     userName: username,
     character: null,
-    abilityScoreRolls: 1,
-    moneyRolls: 1,
-    hpRolls: 1
   };
 
-  const userDataPath = path.join(__dirname, 'database', 'users.json');
-  try {
-    const userData = await fs.promises.readFile(userDataPath, 'utf8');
-    const users = JSON.parse(userData);
-    if (!users[id]) {
-      users[id] = user;
-      await fs.promises.writeFile(userDataPath, JSON.stringify(users, null, 2));
+  const query = 'INSERT OR IGNORE INTO users (userId, userName, character) VALUES (?, ?, ?)';
+  db.run(query, [user.userID, user.userName, user.character], (err) => {
+    if (err) {
+      console.error('Error inserting user data:', err.message);
     }
-  } catch (error) {
-    console.error('Error while reading/writing user data:', error);
-  }
+  });
 });
 
 client.on('interactionCreate', async (interaction) => {
@@ -71,7 +72,7 @@ client.on('interactionCreate', async (interaction) => {
     console.error(`No command matching ${interaction.commandName} was found.`);
     return;
   }
-  await command.execute(interaction);
+  await command.execute(interaction, db);
 });
 
 client.on('messageCreate', async (message) => {

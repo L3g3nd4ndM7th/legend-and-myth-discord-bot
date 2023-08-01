@@ -1,6 +1,4 @@
-const fs = require('fs');
-const path = require('path');
-const { EmbedBuilder, SlashCommandBuilder } = require('discord.js');
+const { SlashCommandBuilder } = require('discord.js');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -16,66 +14,104 @@ module.exports = {
           { name: 'No', value: 'no' }
         )
     ),
-  async execute(interaction) {
+  async execute(interaction, db) {
     const userId = interaction.user.id;
-    const usersPath = path.join(__dirname, '..', '..', 'database', 'users.json');
-    const usersData = fs.readFileSync(usersPath, 'utf8');
-    const users = JSON.parse(usersData);
 
-    if (users[userId].character) {
-        await interaction.reply({ content: "You have already have a character.", ephemeral: true });
+    db.get('SELECT * FROM users WHERE userId = ?', [userId], (err, userRow) => {
+      if (err) {
+        console.error('Error querying users table:', err);
         return;
       }
 
-    if (interaction.options.getString('finished') === 'yes') {
-      const charactersPath = path.join(__dirname, '..', '..', 'database', 'characters.json');
-      const charactersData = fs.readFileSync(charactersPath, 'utf8');
-      const characters = JSON.parse(charactersData);
+      if (userRow && userRow.character !== null) {
+        interaction.reply({ content: "You already have a character.", ephemeral: true });
+      } else {
+        if (interaction.options.getString('finished') === 'yes') {
+          db.get('SELECT * FROM characters WHERE userId = ?', [userId], (err, charRow) => {
+            if (err) {
+              console.error('Error querying characters table:', err);
+              return;
+            }
 
-      // Check if any properties in the character are null
-      for (const property in characters[userId]) {
-        if (characters[userId][property] === null) {
-          await interaction.reply({ content: "Please do the other commands before finishing your character.", ephemeral: true });
-          return;
+            if (!charRow) {
+              const insertCharQuery = `INSERT INTO characters (userId, name, species, archetype, alignment, strength, dexterity, constitution, intelligence, wisdom, charisma, money, level, experience, hp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+              db.run(insertCharQuery, [userId, '', null, null, null, null, null, null, null, null, null, null, 1, 0, 0], (err) => {
+                if (err) {
+                  console.error('Error inserting data into characters table:', err);
+                  return;
+                }
+              });
+            }
+
+            db.get('SELECT * FROM characters WHERE userId = ?', [userId], (err, charRow) => {
+              if (err) {
+                console.error('Error querying characters table:', err);
+                return;
+              }
+
+              // Check if any properties in the character are null
+              for (const property in charRow) {
+                if (charRow[property] === null) {
+                  interaction.reply({ content: "Please do the other commands before finishing your character.", ephemeral: true });
+                  return;
+                }
+              }
+
+              const updateCharQuery = `UPDATE characters SET hp = ? WHERE userId = ?`;
+              db.run(updateCharQuery, [getRandomNumber(1, 10), userId], (err) => {
+                if (err) {
+                  console.error('Error updating character HP in characters table:', err);
+                  return;
+                }
+              });
+
+              db.get('SELECT * FROM characters WHERE userId = ?', [userId], (err, charRow) => {
+                if (err) {
+                  console.error('Error querying characters table:', err);
+                  return;
+                }
+
+                db.get('SELECT * FROM users WHERE userId = ?', [userId], (err, userRow) => {
+                  if (err) {
+                    console.error('Error querying users table:', err);
+                    return;
+                  }
+
+                  // Assign the character name to the users table
+                  const characterName = charRow.name;
+                  const updateUserQuery = `UPDATE users SET character = ? WHERE userId = ?`;
+                  db.run(updateUserQuery, [characterName, userId], (err) => {
+                    if (err) {
+                      console.error('Error updating character name in users table:', err);
+                      return;
+                    }
+
+                    const description = `**Name:** ${characterName}\n` +
+                      `**Species:** ${charRow.species}\n` +
+                      `**Archetype:** ${charRow.archetype}\n` +
+                      `**Alignment:** ${charRow.alignment}\n` +
+                      `**Strength:** ${charRow.strength}\n` +
+                      `**Dexterity:** ${charRow.dexterity}\n` +
+                      `**Constitution:** ${charRow.constitution}\n` +
+                      `**Intelligence:** ${charRow.intelligence}\n` +
+                      `**Wisdom:** ${charRow.wisdom}\n` +
+                      `**Charisma:** ${charRow.charisma}\n` +
+                      `**Money:** ${charRow.money}\n` +
+                      `**Level:** ${charRow.level}\n` +
+                      `**Experience:** ${charRow.experience}\n` +
+                      `**HP:** ${charRow.hp}`;
+
+                    interaction.reply({ content: description, ephemeral: true });
+                  });
+                });
+              });
+            });
+          });
+        } else {
+          // If finished is "no", do nothing and say nothing
         }
       }
-
-      // Set the character's HP in characters.json
-      characters[userId].hp = getRandomNumber(1, 10); // Generate HP between 1 and 10
-
-      // Set the character's name in users.json
-      users[userId].character = characters[userId].name;
-
-      fs.writeFileSync(charactersPath, JSON.stringify(characters, null, 2));
-      fs.writeFileSync(usersPath, JSON.stringify(users, null, 2));
-
-      // Format character data into the description
-      const description = `**Name:** ${characters[userId].name}\n` +
-        `**Species:** ${characters[userId].species}\n` +
-        `**Archetype:** ${characters[userId].archetype}\n` +
-        `**Alignment:** ${characters[userId].alignment}\n` +
-        `**Strength:** ${characters[userId].strength}\n` +
-        `**Dexterity:** ${characters[userId].dexterity}\n` +
-        `**Constitution:** ${characters[userId].constitution}\n` +
-        `**Intelligence:** ${characters[userId].intelligence}\n` +
-        `**Wisdom:** ${characters[userId].wisdom}\n` +
-        `**Charisma:** ${characters[userId].charisma}\n` +
-        `**Money:** ${characters[userId].money}\n` +
-        `**Level:** ${characters[userId].level}\n` +
-        `**Experience:** ${characters[userId].experience}\n` +
-        `**HP:** ${characters[userId].hp}`;
-
-      // Create the character details embed
-      const embed = new EmbedBuilder()
-        .setColor(0xFFA500)
-        .setTitle('Character Details')
-        .setDescription(description);
-
-      // Send the character details as an embed in the same channel where the command was used
-      await interaction.reply({ embeds: [embed], ephemeral: true });
-    } else {
-      // If finished is "no", do nothing and say nothing
-    }
+    });
   },
 };
 
