@@ -1,9 +1,9 @@
 const { Client, Collection, GatewayIntentBits, SlashCommandBuilder, REST, Routes } = require('discord.js');
 const sqlite3 = require('sqlite3');
 
-const token = 'MTEyNTk5MjgzODI1ODIzNzQ3MQ.G5ewFB.0fIVRdY9VQPyEc9GjnJGZNTg1eLCY1ZUSdq1RQ';
-const clientId = '1125992838258237471';
-const guildId = '1135015035970781204';
+const token = '';
+const clientId = '';
+const guildId = '';
 
 const client = new Client({
   intents: [
@@ -157,6 +157,49 @@ const createCharacterCommand = {
   }
 };
 
+const lookCommand = {
+  command: new SlashCommandBuilder()
+    .setName('look')
+    .setDescription('Get information about the current room.')
+    .toJSON(),
+
+  function: async function look(interaction) {
+    const userId = interaction.user.id;
+    const getUserCharacterQuery = `SELECT room FROM characters WHERE userId = ?`;
+    db.get(getUserCharacterQuery, [userId], (err, row) => {
+      if (err) {
+        console.error('Error retrieving character data:', err);
+        interaction.reply({ content: 'An error occurred while processing your command.', ephemeral: true });
+        return;
+      }
+
+      if (!row || !row.room) {
+        interaction.reply({ content: 'You do not have a character.', ephemeral: true });
+        return;
+      }
+
+      const currentRoomId = row.room;
+      const getRoomNameQuery = `SELECT name FROM rooms WHERE id = ?`;
+      db.get(getRoomNameQuery, [currentRoomId], (err, roomRow) => {
+        if (err) {
+          console.error('Error retrieving room data:', err);
+          interaction.reply({ content: 'An error occurred while processing your command.', ephemeral: true });
+          return;
+        }
+
+        if (!roomRow || !roomRow.name) {
+          console.error('Room name not found for the current room:', currentRoomId);
+          interaction.reply({ content: 'An error occurred while processing your command.', ephemeral: true });
+          return;
+        }
+
+        const currentRoomName = roomRow.name;
+        interaction.reply({ content: `You are at ${currentRoomName}.`, ephemeral: true });
+      });
+    });
+  }
+};
+
 const clearChatCommand = {
   command: new SlashCommandBuilder()
     .setName('clear-chat')
@@ -242,6 +285,8 @@ client.on('messageCreate', async (message) => {
 async function deployCommands() {
   client.commands.set(clearChatCommand.command.name, clearChatCommand);
   client.commands.set(createCharacterCommand.command.name, createCharacterCommand);
+  client.commands.set(lookCommand.command.name, lookCommand);
+
   const rest = new REST({ version: '9' }).setToken(token);
 
   try {
@@ -249,7 +294,7 @@ async function deployCommands() {
     await rest.put(
       Routes.applicationGuildCommands(clientId, guildId),
       {
-        body: [createCharacterCommand.command, clearChatCommand.command],
+        body: [createCharacterCommand.command, clearChatCommand.command, lookCommand.command],
       },
       {
         headers: {
